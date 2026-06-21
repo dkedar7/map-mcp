@@ -30,6 +30,20 @@ def ws_available() -> bool:
     return True
 
 
+def authenticate(first_message: str, expected_token: Optional[str]) -> bool:
+    """Validate the hook's opening ``{type:"hello", token}`` frame against the session token.
+
+    Pure (no I/O), so the handshake rule is unit-testable. When no token is configured
+    (``expected_token`` falsy) the gate is open — but the CLI always issues a token."""
+    if not expected_token:
+        return True
+    try:
+        msg = decode(first_message)
+    except Exception:
+        return False
+    return msg.get("type") == "hello" and msg.get("token") == expected_token
+
+
 class _Pending:
     __slots__ = ("event", "result", "error")
 
@@ -115,6 +129,16 @@ class Bridge:
         loop = asyncio.new_event_loop()
 
         async def handler(ws):
+            # Token handshake (local-only security): require a valid hello before accepting
+            # commands, so a stray page on the loopback port can't drive the operator's map.
+            if token:
+                try:
+                    first = await asyncio.wait_for(ws.recv(), timeout=10)
+                except Exception:
+                    return
+                if not authenticate(first, token):
+                    await ws.close(code=4001, reason="bad token")
+                    return
             send = lambda text: asyncio.run_coroutine_threadsafe(ws.send(text), loop)
             self.attach_sender(send)
             try:
