@@ -12,6 +12,7 @@ and the MCP tools synchronous, matching streamlit-mcp's engine.
 
 from __future__ import annotations
 
+import secrets
 import threading
 from typing import Any, Callable, Optional
 
@@ -41,7 +42,10 @@ def authenticate(first_message: str, expected_token: Optional[str]) -> bool:
         msg = decode(first_message)
     except Exception:
         return False
-    return msg.get("type") == "hello" and msg.get("token") == expected_token
+    if msg.get("type") != "hello":
+        return False
+    # constant-time compare so token validation leaks no timing signal
+    return secrets.compare_digest(str(msg.get("token") or ""), str(expected_token))
 
 
 class _Pending:
@@ -61,29 +65,50 @@ class Bridge:
         self._lock = threading.Lock()
         self._sender: Optional[Callable[[str], None]] = None
         self._thread: Optional[threading.Thread] = None
+        self.port: Optional[int] = None
+        self._loop: Any = None
 
     @property
     def connected(self) -> bool:
         return self._sender is not None
 
     def attach_sender(self, sender: Callable[[str], None]) -> None:
-        """Bind the function that writes a frame to the connected hook."""
+        """Bind the function that writes a frame to the connected hook (last writer wins —
+        a reconnect/new tab replaces the old; the old's in-flight calls then time out)."""
         self._sender = sender
 
-    def detach(self) -> None:
-        self._sender = None
+    def detach(self, sender: Optional[Callable[[str], None]] = None) -> None:
+        """Clear the sender on disconnect. Identity-guarded: a stale connection's teardown
+        only clears the sender if it is still the *current* one — so a page reload (new
+        socket attaches, then the old socket's close fires) can't null the live sender.
+        Draining lets in-flight calls fail fast with 'map disconnected' instead of timing out."""
+        if sender is None or self._sender is sender:
+            self._sender = None
+            self._drain_pending("map disconnected")
+
+    def _drain_pending(self, message: str) -> None:
+        with self._lock:
+            waiting = list(self._pending.values())
+        for pend in waiting:
+            if pend.error is None and pend.result is None:
+                pend.error = message
+                pend.event.set()
 
     def call(self, method: str, params: Optional[dict] = None, *, timeout: float = 10.0) -> Any:
         """Send a request and block for its reply. Raises BridgeError on no-connection,
-        timeout, or an error reply."""
-        if self._sender is None:
+        send failure, timeout, disconnect, or an error reply — never leaks another exception."""
+        sender = self._sender
+        if sender is None:
             raise BridgeError("no map connected — open a hooked map and try again")
         req = make_request(method, params)
         pend = _Pending()
         with self._lock:
             self._pending[req["id"]] = pend
         try:
-            self._sender(encode(req))
+            try:
+                sender(encode(req))
+            except Exception as e:  # closed loop / dropped socket -> clean BridgeError, not a leak
+                raise BridgeError(f"send failed: {e}") from e
             if not pend.event.wait(timeout):
                 raise BridgeError(f"timeout after {timeout}s waiting for {method!r}")
             if pend.error is not None:
@@ -127,8 +152,9 @@ class Bridge:
         import websockets
 
         loop = asyncio.new_event_loop()
+        self._loop = loop
         ready = threading.Event()
-        self.port: Optional[int] = None
+        startup: dict[str, BaseException] = {}
 
         async def handler(ws):
             # Token handshake (local-only security): require a valid hello before accepting
@@ -147,7 +173,7 @@ class Bridge:
                 async for message in ws:
                     self._on_message(message)
             finally:
-                self.detach()
+                self.detach(send)  # identity-guarded: only clears if still the current sender
 
         async def main():
             async with websockets.serve(handler, host, port) as server:
@@ -160,8 +186,17 @@ class Bridge:
 
         def run():
             asyncio.set_event_loop(loop)
-            loop.run_until_complete(main())
+            try:
+                loop.run_until_complete(main())
+            except BaseException as e:  # bind failure (port in use), etc.
+                startup["error"] = e
+                ready.set()  # unblock the waiter so it can surface the error
 
         self._thread = threading.Thread(target=run, daemon=True, name="map-mcp-bridge")
         self._thread.start()
-        ready.wait(timeout=5)  # don't return until the server is actually listening
+        # Don't return until the server is actually listening — and surface startup failure
+        # (a port-in-use bind error would otherwise die silently in the thread).
+        if not ready.wait(timeout=5):
+            raise BridgeError("bridge did not start within 5s")
+        if "error" in startup:
+            raise BridgeError(f"bridge failed to start: {startup['error']}")

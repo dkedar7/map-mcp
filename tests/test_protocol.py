@@ -92,3 +92,50 @@ def test_stale_id_is_ignored():
 
 def test_ws_available_is_bool():
     assert isinstance(ws_available(), bool)
+
+
+# --- disconnect / reconnect correctness (review findings) ---
+def test_detach_of_current_sender_drains_pending_calls():
+    import time
+
+    bridge = Bridge()
+    sent: list = []
+    bridge.attach_sender(lambda t: sent.append(t))  # accepts the send, never replies
+    result: dict = {}
+
+    def caller():
+        try:
+            bridge.call("get_viewport", timeout=5)
+        except BridgeError as e:
+            result["err"] = str(e)
+
+    t = threading.Thread(target=caller)
+    t.start()
+    deadline = time.monotonic() + 2
+    while not sent and time.monotonic() < deadline:
+        time.sleep(0.01)
+    bridge.detach()          # the current connection drops
+    t.join(timeout=2)
+    assert "map disconnected" in result.get("err", "")  # fails fast, not a 5s timeout
+
+
+def test_identity_detach_does_not_clear_a_newer_sender():
+    bridge = Bridge()
+    a = lambda t: None
+    b = lambda t: None
+    bridge.attach_sender(a)
+    bridge.attach_sender(b)   # reconnect: b replaces a
+    bridge.detach(a)          # a's stale close must NOT null the live sender b
+    assert bridge._sender is b and bridge.connected
+    bridge.detach(b)
+    assert not bridge.connected
+
+
+def test_send_failure_becomes_bridge_error():
+    bridge = Bridge()
+    def boom(_):
+        raise RuntimeError("Event loop is closed")  # the closed-loop case
+    bridge.attach_sender(boom)
+    with pytest.raises(BridgeError) as e:
+        bridge.call("get_viewport", timeout=1)
+    assert "send failed" in str(e.value)  # not a leaked RuntimeError, not a full timeout

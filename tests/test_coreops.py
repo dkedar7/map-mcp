@@ -33,6 +33,13 @@ def test_click_at_sends_point(fake_bridge):
     assert b.last() == ("click_at", {"point": [12.5, 41.9]})
 
 
+def test_get_features_at(fake_bridge):
+    b = fake_bridge({"get_features_at": {"features": [{"layer": "cities"}]}})
+    out = CoreOps(b).get_features_at([12.5, 41.9], layers=["cities"])
+    assert out["features"][0]["layer"] == "cities"
+    assert b.last() == ("get_features_at", {"point": [12.5, 41.9], "layers": ["cities"]})
+
+
 def test_set_layer_visibility_roundtrips_bool(fake_bridge):
     b = fake_bridge({"set_layer_visibility": {"layer": "roads", "visibility": "none"}})
     co = CoreOps(b)

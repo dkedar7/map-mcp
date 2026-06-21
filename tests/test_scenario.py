@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from map_mcp.bridge import Bridge, ws_available
+from map_mcp.bridge import Bridge, BridgeError, ws_available
 from map_mcp.cli import run_op
 from map_mcp.coreops import CoreOps, OP_NAMES
 from map_mcp.protocol import decode, encode, make_response
@@ -113,10 +113,23 @@ def test_live_socket_rejects_bad_token():
     )
     hook.start()
     try:
-        time.sleep(0.6)  # give the (rejected) handshake time to resolve
-        assert not bridge.connected  # bad token -> never attached
+        # poll a short window: it must NEVER attach (fail fast if it wrongly does)
+        for _ in range(20):
+            assert not bridge.connected, "bad token must not authenticate"
+            time.sleep(0.05)
     finally:
         stop.set()
+
+
+@pytest.mark.skipif(not ws_available(), reason="websockets not installed")
+def test_serve_ws_surfaces_port_in_use():
+    # the first bridge binds an ephemeral port; the second must raise (not silently 'start')
+    b1 = Bridge()
+    b1.serve_ws(host="127.0.0.1", port=0, token="t")
+    assert b1.port
+    b2 = Bridge()
+    with pytest.raises(BridgeError):
+        b2.serve_ws(host="127.0.0.1", port=b1.port, token="t")
 
 
 # --- live browser drive of the sample app (gated; manual / pm-dogfood path) ---

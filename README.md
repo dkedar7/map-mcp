@@ -66,8 +66,14 @@ properties, not pixels. `screenshot` is optional.
 
 The hook connects *out* to a loopback WebSocket the `map-mcp` process runs. The MCP tools and
 the CLI are thin frontends over one shared core-operations layer, so any operation one can do,
-the other can too. The bridge binds `127.0.0.1` only and requires the per-session token — a
-stray page can't drive your map.
+the other can too.
+
+**Security model (local-only).** The bridge binds `127.0.0.1` only, so nothing off your machine
+can reach it. Browsers do *not* apply same-origin policy to WebSocket connections, so the
+**per-session token is the security boundary**: only a page that presents it can drive your map.
+Treat the token like a secret — the convenience `?token=` pattern in the example leaks it via
+browser history and server logs, so for anything sensitive paste the token into the page rather
+than the URL. A hardened Origin allowlist is future work.
 
 ## Scope (v1)
 

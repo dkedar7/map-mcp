@@ -6,7 +6,7 @@ import pytest
 
 from map_mcp.bridge import Bridge, BridgeError
 from map_mcp.coreops import CoreOps, OP_NAMES
-from map_mcp.server import build_server, core_tool_handlers, run_server, validate_transport
+from map_mcp.server import _guard, build_server, core_tool_handlers, run_server, validate_transport
 
 
 def test_handlers_cover_exactly_the_op_surface(fake_bridge):
@@ -55,3 +55,10 @@ def test_transport_validation():
 def test_http_refuses_non_loopback():
     with pytest.raises(ValueError):
         run_server(Bridge(), transport="http", host="0.0.0.0")
+
+
+def test_guard_catches_typeerror_for_failclosed_parity():
+    # the MCP guard must catch TypeError too (matching the CLI), so the surfaces fail closed alike
+    def raises_typeerror():
+        raise TypeError("bad kwargs")
+    assert _guard(raises_typeerror)() == {"error": "bad kwargs"}

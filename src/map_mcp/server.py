@@ -20,11 +20,15 @@ VALID_TRANSPORTS = ("stdio", "http", "sse")
 
 
 def _guard(fn: Callable) -> Callable:
-    """Fail closed: turn a no-connection/hook/input error into a clean error result."""
+    """Fail closed: turn a no-connection/hook/input error into a clean error result.
+
+    Matches the CLI's run_op catch set (BridgeError, ValueError, TypeError) so the two
+    frontends fail closed identically. The bridge converts transport faults (closed loop,
+    dropped socket) into BridgeError at the source, so nothing else should escape here."""
     def wrapped(*args, **kwargs):
         try:
             return fn(*args, **kwargs)
-        except (BridgeError, ValueError) as e:
+        except (BridgeError, ValueError, TypeError) as e:
             return {"error": str(e)}
     return wrapped
 

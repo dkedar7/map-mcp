@@ -1,7 +1,7 @@
 """map-mcp CLI — the human-first surface.
 
 `serve` starts the bridge + the MCP server (for agents) and prints the opt-in snippet + token.
-`call` / `repl` let a human drive the live map from the terminal. All paths go through the same
+`call` lets a human drive the live map from the terminal. Both paths go through the same
 ``CoreOps`` an agent uses over MCP, so parity holds by construction — ``run_op`` accepts exactly
 the operations the MCP tools expose.
 """
@@ -53,6 +53,15 @@ def _snippet(ws_port: int, token: str) -> str:
 
 
 # --------------------------------------------------------------------- commands
+def _start_bridge(ws_port: int) -> tuple[Bridge, str]:
+    """Start the loopback bridge with a fresh per-session token. Raises BridgeError on
+    startup failure (e.g. port in use). Shared by serve and call."""
+    token = secrets.token_urlsafe(16)
+    bridge = Bridge()
+    bridge.serve_ws(host="127.0.0.1", port=ws_port, token=token)
+    return bridge, token
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     from .server import run_server, validate_transport
     try:
@@ -60,14 +69,12 @@ def cmd_serve(args: argparse.Namespace) -> int:
     except ValueError as e:
         print(str(e), file=sys.stderr)
         return 1
-    token = secrets.token_urlsafe(16)
-    bridge = Bridge()
     try:
-        bridge.serve_ws(host="127.0.0.1", port=args.ws_port, token=token)
+        bridge, token = _start_bridge(args.ws_port)
     except Exception as e:
         print(f"could not start the map bridge: {e}", file=sys.stderr)
         return 1
-    print(_snippet(args.ws_port, token), file=sys.stderr)
+    print(_snippet(bridge.port, token), file=sys.stderr)
     try:
         run_server(bridge, transport=args.transport, host=args.host, port=args.port)
     except ValueError as e:
@@ -91,14 +98,12 @@ def cmd_call(args: argparse.Namespace) -> int:
     except json.JSONDecodeError as e:
         print(f"bad --params JSON: {e}", file=sys.stderr)
         return 1
-    token = secrets.token_urlsafe(16)
-    bridge = Bridge()
     try:
-        bridge.serve_ws(host="127.0.0.1", port=args.ws_port, token=token)
+        bridge, token = _start_bridge(args.ws_port)
     except Exception as e:
         print(f"could not start the map bridge: {e}", file=sys.stderr)
         return 1
-    print(_snippet(args.ws_port, token), file=sys.stderr)
+    print(_snippet(bridge.port, token), file=sys.stderr)
     if not _wait_for_map(bridge, args.wait):
         print("no map connected — open your hooked map, then retry", file=sys.stderr)
         return 1
