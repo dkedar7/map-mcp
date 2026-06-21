@@ -127,6 +127,8 @@ class Bridge:
         import websockets
 
         loop = asyncio.new_event_loop()
+        ready = threading.Event()
+        self.port: Optional[int] = None
 
         async def handler(ws):
             # Token handshake (local-only security): require a valid hello before accepting
@@ -148,7 +150,12 @@ class Bridge:
                 self.detach()
 
         async def main():
-            async with websockets.serve(handler, host, port):
+            async with websockets.serve(handler, host, port) as server:
+                try:
+                    self.port = server.sockets[0].getsockname()[1]
+                except Exception:
+                    self.port = port
+                ready.set()
                 await asyncio.Future()  # serve forever
 
         def run():
@@ -157,3 +164,4 @@ class Bridge:
 
         self._thread = threading.Thread(target=run, daemon=True, name="map-mcp-bridge")
         self._thread.start()
+        ready.wait(timeout=5)  # don't return until the server is actually listening

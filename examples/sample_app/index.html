@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<!--
+  map-mcp sample app — a minimal hooked MapLibre GL map for the first validated scenario.
+
+  Run:
+    1) map-mcp serve            # prints ws url + token
+    2) serve this folder:  python -m http.server 8080
+    3) open http://localhost:8080/?token=PASTE_TOKEN
+       (the page reads ?token= and registers the live map with the bridge)
+
+  It shows a basemap + a points layer with clickable popups, created with
+  preserveDrawingBuffer:true so the screenshot tool works.
+-->
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>map-mcp sample</title>
+    <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
+    <link href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css" rel="stylesheet" />
+    <script src="../../hook/map-mcp-hook.js"></script>
+    <style>html, body, #map { height: 100%; margin: 0; }</style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script>
+      const map = new maplibregl.Map({
+        container: "map",
+        style: "https://demotiles.maplibre.org/style.json",
+        center: [12.5, 41.9],
+        zoom: 4,
+        preserveDrawingBuffer: true, // required for the screenshot tool
+      });
+
+      const cities = {
+        type: "FeatureCollection",
+        features: [
+          { type: "Feature", properties: { name: "Rome", pop: 2800000 },
+            geometry: { type: "Point", coordinates: [12.5, 41.9] } },
+          { type: "Feature", properties: { name: "Berlin", pop: 3600000 },
+            geometry: { type: "Point", coordinates: [13.4, 52.5] } },
+        ],
+      };
+
+      map.on("load", () => {
+        map.addSource("cities", { type: "geojson", data: cities });
+        map.addLayer({
+          id: "cities", type: "circle", source: "cities",
+          paint: { "circle-radius": 7, "circle-color": "#c33" },
+        });
+        map.on("click", "cities", (e) => {
+          const f = e.features[0];
+          new maplibregl.Popup()
+            .setLngLat(f.geometry.coordinates)
+            .setHTML(`<b>${f.properties.name}</b><br/>pop ${f.properties.pop}`)
+            .addTo(map);
+        });
+
+        // Register the live map with the bridge (token from ?token=).
+        const token = new URLSearchParams(location.search).get("token") || "";
+        mapMcp.register(map, { url: "ws://127.0.0.1:8765", token });
+      });
+    </script>
+  </body>
+</html>
