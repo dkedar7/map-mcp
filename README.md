@@ -13,6 +13,11 @@ access, but conversational over MCP instead of written as test code.
 > **Status:** v1, MapLibre GL only. Cooperation-required (your app adds a one-line hook). A
 > no-cooperation path and other map libraries are future work.
 
+![A LangChain agent driving a live MapLibre map via map-mcp](assets/agent-demo.gif)
+
+*A [LangChain agent](examples/langchain_agent.py) finds the most-populous visible city and
+navigates to it — perceiving and driving the live map through map-mcp.*
+
 ## Install
 
 ```
@@ -39,7 +44,24 @@ uvx map-mcp --help          # or: pip install map-mcp
    map-mcp call query_rendered_features --params '{"point":[12.5,41.9]}'
    ```
 
-There's a runnable example in [`examples/sample_app/`](examples/sample_app/).
+There's a runnable sample app in [`examples/sample_app/`](examples/sample_app/).
+
+## Example: a LangChain agent
+
+[`examples/langchain_agent.py`](examples/langchain_agent.py) is a real agent — a langgraph
+ReAct agent on any tool-capable model — that drives the live map through map-mcp's operations
+(it's how the GIF above was made). Give it the map-mcp tools and a task, and it perceives and
+navigates the map itself:
+
+```
+export OPENROUTER_API_KEY=sk-or-...
+uvx playwright install chromium          # one-time, for the live browser
+uv run --extra demo python examples/langchain_agent.py
+```
+
+It defaults to an OpenRouter model (set `OPENROUTER_MODEL` to change). The agent's tools are
+thin wrappers over the same `CoreOps` the MCP server exposes — so anything the agent does, the
+CLI does too.
 
 ## Tools (the operation surface)
 
@@ -63,6 +85,8 @@ properties, not pixels. `screenshot` is optional.
 \* needs the map created with `preserveDrawingBuffer: true` (see [`hook/snippet.md`](hook/snippet.md)).
 
 ## How it works
+
+![map-mcp architecture: browser hook to local WebSocket bridge to core-ops to MCP server and CLI](assets/architecture.svg)
 
 The hook connects *out* to a loopback WebSocket the `map-mcp` process runs. The MCP tools and
 the CLI are thin frontends over one shared core-operations layer, so any operation one can do,

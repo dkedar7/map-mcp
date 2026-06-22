@@ -32,6 +32,8 @@ map-mcp = "map_mcp.cli:_cli"
 
 [project.optional-dependencies]
 dev = ["pytest>=7"]
+# extras for examples/langchain_agent.py (a real agent driving a live map)
+demo = ["langchain-openai>=0.2", "langgraph>=0.2", "playwright>=1.40"]
 
 [build-system]
 requires = ["hatchling"]
